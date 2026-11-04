@@ -10,6 +10,7 @@ import re
 import socket
 import struct
 import subprocess
+import sys
 import threading
 import time
 from collections import deque
@@ -25,7 +26,8 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(BASE, "web")
 NAMES_FILE = os.path.join(BASE, "names.json")
 KNOWN_FILE = os.path.join(BASE, "known.json")  # equipos en los que confías
-PORT = 8765
+DEMO = "--demo" in sys.argv  # datos inventados: no escanea ni toca history.db (ver demo.py)
+PORT = 8766 if DEMO else 8765
 SCAN_EVERY = 5       # segundos entre escaneos
 ONLINE_WINDOW = 40   # segundos sin responder ping para pasar a "sin respuesta"
 NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW (Windows)
@@ -48,7 +50,7 @@ hostname_tried = {}
 probe_tried = {}
 mdns_tried = {}
 names = {}
-history = History(os.path.join(BASE, "history.db"))  # quien estuvo en la red y cuando
+history = None if DEMO else History(os.path.join(BASE, "history.db"))  # quien estuvo en la red y cuando
 motion = MotionDetector(on_event=lambda kind, text, ts: history.add_event(kind, text, ts))
 
 
@@ -698,6 +700,22 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        if DEMO and self.path.startswith("/api/"):
+            import demo
+            route = self.path.split("?")[0]
+            if route == "/api/devices":
+                return self._json(demo.devices())
+            if route == "/api/wifi":
+                return self._json(demo.wifi())
+            if route == "/api/bluetooth":
+                return self._json(demo.bluetooth())
+            if route == "/api/history":
+                try:
+                    day = int(parse_qs(urlparse(self.path).query).get("day", ["0"])[0])
+                except ValueError:
+                    day = 0
+                return self._json(demo.history(max(0, min(day, 60))))
+            return self._json({"radar_on": True})
         extra = {"radar_on": radar_on.is_set(), "motion": motion.state()}
         if self.path.startswith("/api/devices"):
             return self._json({**snapshot(), **extra})
@@ -767,14 +785,15 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def main():
-    load_names()
-    load_known()
-    threading.Thread(target=scan_loop, daemon=True).start()
-    threading.Thread(target=wifi_loop, daemon=True).start()
-    threading.Thread(target=bt_loop, daemon=True).start()
-    threading.Thread(target=ble_loop, daemon=True).start()
+    if not DEMO:
+        load_names()
+        load_known()
+        threading.Thread(target=scan_loop, daemon=True).start()
+        threading.Thread(target=wifi_loop, daemon=True).start()
+        threading.Thread(target=bt_loop, daemon=True).start()
+        threading.Thread(target=ble_loop, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), partial(Handler, directory=WEB))
-    print(f"WiFi Radar listo -> http://radar.localhost:{PORT}  (Ctrl+C para salir)")
+    print(f"WiFi Radar listo{' (MODO DEMO, datos inventados)' if DEMO else ''} -> http://radar.localhost:{PORT}  (Ctrl+C para salir)")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

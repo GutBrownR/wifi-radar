@@ -690,6 +690,7 @@
     $('status').textContent = 'historial · ' + new Date(j.day_start * 1000).toLocaleDateString();
   }
   $('tabHist').onclick = () => setMode('hist');
+  { const h = location.hash.slice(1); if (h === 'wifi' || h === 'bt' || h === 'hist') setMode(h); }  // enlace directo a una pestaña
 
   poll(); setInterval(poll, 2000);
 

@@ -1,10 +1,23 @@
 # WiFi Radar
 
-Radar 3D de tu red y de los WiFis de alrededor. Solo para redes tuyas o con permiso del dueño.
+Radar 3D de tu red local y de los WiFis de alrededor. Solo Python y un navegador; todo corre en tu propia laptop.
+**Solo para redes tuyas o con permiso del dueño.**
+
+![Mi red](docs/img/red.png)
+
+> Las capturas usan el **modo demo** (datos inventados), no una red real.
+
+| WiFis cercanos | Bluetooth |
+|---|---|
+| ![WiFis cercanos](docs/img/wifi.png) | ![Bluetooth](docs/img/bluetooth.png) |
+
+![Historial](docs/img/historial.png)
 
 ## Usar
 Doble clic en `iniciar.bat` (abre http://radar.localhost:8765). O desde una terminal: `python server.py`.
-Necesita Python 3 e internet (la librería Three.js se carga desde jsDelivr).
+Necesita Python 3 y Windows. Hace falta internet para cargar la librería Three.js desde jsDelivr.
+
+**Probar sin escanear nada (modo demo):** `python server.py --demo` y abre http://radar.localhost:8766.
 
 ## Qué hace
 - **Mi red:** dispositivos conectados con ícono 3D por tipo, estado (activo / en reposo) y latencia.
@@ -28,14 +41,15 @@ Necesita Python 3 e internet (la librería Three.js se carga desde jsDelivr).
 ## Botones
 - **Apagar / Encender radar:** pausa o reanuda todos los escaneos (red, WiFi y Bluetooth). Apagado, la escena se oscurece.
 - **Centrar**, **Giro**, **Sonido**, **Pantalla:** vista inicial, giro automático, alerta sonora y pantalla completa.
-- **Buscador** en el panel, y clic en cualquier punto (incluso una red WiFi) para ponerle nombre. Ej.: el dron sale como «Dron P11s Max S».
+- **Buscador** en el panel, y clic en cualquier punto (incluso una red WiFi) para ponerle nombre.
 
 ## Archivos
 - `server.py`: escáner (ping + ARP + netsh) y servidor local. Solo escucha en 127.0.0.1.
 - `web/index.html`: el radar 3D.
 - `history.py`: historial de presencia. `motion.py`: detector de movimiento. `ble/BleScan.cs`: escáner Bluetooth.
-- `names.json`: nombres que tú asignas. `known.json`: equipos de confianza.
+- `demo.py`: datos inventados para el modo demo y las capturas.
+- `names.json`: nombres que tú asignas. `known.json`: equipos de confianza. Ambos se crean al usarlo y **no se suben a git**.
 
 ## Límites
 Muestra dispositivos, no personas. Las distancias son estimaciones. "Activo / en reposo" sale del ping,
-no mide datos. Para detectar movimiento real hace falta ESP32 con CSI.
+no mide datos. El movimiento por señal WiFi es aproximado; para algo mejor hace falta un ESP32 con CSI.
