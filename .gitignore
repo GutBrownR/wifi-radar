@@ -1,0 +1,11 @@
+# Datos personales: nombres, MAC y horarios de tu familia. No subir.
+names.json
+known.json
+history.db
+history.db-journal
+
+# Se genera solo la primera vez que corre el servidor
+ble/BleScan.exe
+
+__pycache__/
+*.pyc

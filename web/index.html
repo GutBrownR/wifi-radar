@@ -1,0 +1,842 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WiFi Radar</title>
+<style>
+  :root {
+    --bg: #04090d; --panel: rgba(8, 20, 26, .82); --line: rgba(80, 230, 190, .18);
+    --text: #d6f5ec; --muted: #6f948c; --accent: #38f2a6;
+    --online: #38f2a6; --idle: #f5b942; --router: #4cc9ff; --self: #b794ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace; overflow: hidden; }
+  canvas { position: fixed; inset: 0; display: block; cursor: grab; }
+  canvas.drag { cursor: grabbing; }
+  #labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+  .lbl { position: absolute; transform: translate(-50%, -150%); white-space: nowrap; font-size: 11px;
+    text-shadow: 0 0 6px #000, 0 0 2px #000; opacity: .9; transition: opacity .3s;
+    background: rgba(4, 14, 18, .6); border-left: 2px solid currentColor; border-radius: 5px; padding: 2px 8px; backdrop-filter: blur(2px); }
+  body::after { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 1;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, .6)); }
+  aside, header { z-index: 2; }
+  .lbl small { display: block; color: var(--muted); font-size: 10px; text-align: center; }
+  header { position: fixed; top: 16px; left: 20px; pointer-events: none; }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: .25em; color: var(--accent); font-weight: 600; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+  #scanDot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+    margin-right: 6px; animation: blink 1.4s infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+  aside { position: fixed; top: 16px; right: 16px; bottom: 16px; width: 330px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px; backdrop-filter: blur(8px); display: flex; flex-direction: column; }
+  aside h2 { margin: 0; padding: 14px 16px 8px; font-size: 12px; letter-spacing: .2em; color: var(--muted); font-weight: 500; }
+  .tabs { display: flex; gap: 6px; padding: 12px 12px 0; }
+  .tabs button { flex: 1; background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 4px; font: inherit; font-size: 12px; cursor: pointer; }
+  .tabs button.on { color: var(--accent); border-color: var(--accent); background: rgba(56, 242, 166, .08); }
+  #alert { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 6; display: none; max-width: min(560px, 92vw);
+    background: rgba(40, 8, 14, .94); border: 1px solid #ff5d73; border-radius: 10px; padding: 10px 14px; color: #ffd6dc; font-size: 12px;
+    box-shadow: 0 0 24px rgba(255, 93, 115, .35); }
+  #alert b { color: #ff8a9a; }
+  #alert button, .row .trust { background: transparent; color: #ffd6dc; border: 1px solid #ff5d73; border-radius: 6px;
+    padding: 2px 8px; margin-left: 8px; font: inherit; font-size: 11px; cursor: pointer; }
+  #alert button:hover, .row .trust:hover { background: rgba(255, 93, 115, .2); }
+  .row .trust { grid-column: 2 / 4; justify-self: start; margin: 2px 0 0; }
+  .card { margin: 4px 4px 8px; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--line); font-size: 11px; line-height: 1.45; color: var(--muted); }
+  .card b { display: block; color: var(--text); font-size: 12px; margin-bottom: 2px; }
+  .card.alta { border-color: #ff5d73; background: rgba(255, 93, 115, .08); } .card.alta b { color: #ff8a9a; }
+  .card.media { border-color: var(--idle); background: rgba(245, 185, 66, .07); } .card.media b { color: var(--idle); }
+  .card.ok { border-color: var(--line); } .card.ok b { color: var(--accent); }
+  #count { padding: 0 16px 10px; font-size: 26px; color: var(--accent); border-bottom: 1px solid var(--line); }
+  #count span { font-size: 12px; color: var(--muted); margin-left: 6px; }
+  #list { flex: 1; overflow-y: auto; padding: 6px 8px; }
+  .row { display: grid; grid-template-columns: 12px 1fr auto; gap: 4px 10px; align-items: center; padding: 8px;
+    border-radius: 8px; cursor: pointer; }
+  .row:hover, .row.hl { background: rgba(80, 230, 190, .09); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 8px currentColor; background: currentColor; }
+  .nm { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sub { grid-column: 2 / 4; color: var(--muted); font-size: 11px; margin-top: -2px; }
+  .ms { color: var(--muted); font-size: 11px; }
+  footer { padding: 10px 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+  #tip { position: fixed; pointer-events: none; background: rgba(4, 14, 18, .95); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; font-size: 12px; display: none; z-index: 5; }
+  #tip b { color: var(--accent); }
+  #hint { position: fixed; left: 20px; bottom: 64px; color: var(--muted); font-size: 11px; pointer-events: none; }
+  /* barra de botones */
+  #bar { position: fixed; left: 20px; bottom: 16px; z-index: 3; display: flex; gap: 8px; flex-wrap: wrap; max-width: calc(100vw - 380px); }
+  #bar button, .tabs button, #q { font: inherit; font-size: 12px; }
+  #bar button { display: inline-flex; align-items: center; gap: 6px; background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: 9px; padding: 8px 12px; cursor: pointer; backdrop-filter: blur(6px); transition: background .15s, border-color .15s, transform .1s; }
+  #bar button:hover { border-color: var(--accent); background: rgba(56, 242, 166, .1); }
+  #bar button:active { transform: scale(.96); }
+  #bar button.tg:not(.on) { color: var(--muted); }
+  #bar button.tg:not(.on) .ic { opacity: .4; }
+  #bar .ic { font-size: 14px; line-height: 1; }
+  #power { font-weight: 600; letter-spacing: .04em; border-color: var(--accent); color: var(--accent); }
+  #power .led { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+  #power.off { border-color: #ff5d73; color: #ff8a9a; }
+  #power.off .led { background: #ff5d73; box-shadow: 0 0 10px #ff5d73; }
+  button:focus-visible, #q:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* radar apagado: la escena se apaga y se congela */
+  canvas { transition: filter .5s; }
+  body.off canvas { filter: grayscale(.9) brightness(.45); }
+  #offBadge { position: fixed; top: 50%; left: calc(50% - 165px); transform: translate(-50%, -50%); z-index: 3; display: none; text-align: center;
+    color: #ff8a9a; letter-spacing: .3em; font-size: 15px; pointer-events: none; text-shadow: 0 0 14px rgba(255, 93, 115, .6); }
+  #offBadge small { display: block; margin-top: 6px; letter-spacing: .05em; font-size: 11px; color: var(--muted); }
+  body.off #offBadge { display: block; }
+  body.off #scanDot { background: #ff5d73; animation: none; }
+  /* indicador de movimiento */
+  .chip { display: inline-block; margin-left: 10px; padding: 1px 9px; border-radius: 10px; font-size: 11px; border: 1px solid var(--line); color: var(--muted); }
+  .chip.calma { color: var(--accent); border-color: rgba(56, 242, 166, .4); }
+  .chip.movimiento { border-color: #ff5d73; color: #ff8a9a; background: rgba(255, 93, 115, .14); animation: blink 1s infinite; }
+  /* historial */
+  #hist { position: fixed; left: 20px; top: 76px; bottom: 70px; right: 370px; z-index: 3; display: none; overflow-y: auto; padding: 14px 18px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; backdrop-filter: blur(8px); }
+  body.hist #hist { display: block; }
+  body.hist #hint { display: none; }
+  .hhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .hhead b { color: var(--accent); font-weight: 600; margin-right: auto; }
+  .hhead button { background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 7px; padding: 4px 10px; font: inherit; font-size: 11px; cursor: pointer; }
+  .hhead button.on, .hhead button:hover { color: var(--accent); border-color: var(--accent); }
+  .hrow { display: grid; grid-template-columns: minmax(120px, 190px) 1fr auto; gap: 2px 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+  .hrow .hn { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hrow .hn em { font-style: normal; color: var(--accent); font-size: 10px; margin-left: 6px; }
+  .hrow .ht { font-size: 12px; color: var(--accent); text-align: right; white-space: nowrap; }
+  .hrow .hs { grid-column: 2 / 4; color: var(--muted); font-size: 11px; }
+  .strip { position: relative; height: 16px; border-radius: 4px; overflow: hidden;
+    background: repeating-linear-gradient(90deg, rgba(255,255,255,.07) 0 1px, rgba(255,255,255,.025) 1px calc(100% / 24)); }
+  .strip .seg { position: absolute; top: 2px; bottom: 2px; border-radius: 3px; background: var(--accent); opacity: .85; }
+  .strip .now { position: absolute; top: 0; bottom: 0; width: 2px; background: #ff8a9a; }
+  .axis { display: grid; grid-template-columns: minmax(120px, 190px) 1fr auto; gap: 12px; color: var(--muted); font-size: 10px; margin-bottom: 4px; }
+  .axis div { display: flex; justify-content: space-between; } .axis i { visibility: hidden; font-style: normal; }
+  .hev { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; }
+  .hev div { padding: 3px 0; color: var(--muted); } .hev .movimiento { color: #ff8a9a; }
+  .hnote { margin-top: 14px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+  @media (max-width: 760px) { #hist { right: 12px; left: 12px; bottom: 40vh; top: 70px; } .hrow { grid-template-columns: 1fr auto; } .hrow .strip, .hrow .hs { grid-column: 1 / 3; } .axis { display: none; } }
+  /* buscador y tabs */
+  #q { margin: 8px 12px 0; padding: 8px 10px; background: rgba(0, 0, 0, .25); color: var(--text); border: 1px solid var(--line); border-radius: 8px; }
+  #q::placeholder { color: var(--muted); }
+  .tabs button { transition: background .15s, border-color .15s, color .15s; }
+  .tabs button:hover { border-color: var(--accent); color: var(--text); }
+  .tabs button .n { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 5px; border-radius: 9px; background: rgba(255, 255, 255, .08);
+    font-size: 10px; line-height: 16px; }
+  .tabs button.on .n { background: rgba(56, 242, 166, .2); }
+  #err { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; color: var(--idle); display: none; }
+  @media (max-width: 760px) {
+    aside { top: auto; left: 12px; right: 12px; bottom: 12px; width: auto; height: 38vh; }
+    #hint { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="labels"></div>
+<header>
+  <h1>WIFI RADAR</h1>
+  <p><span id="scanDot"></span><span id="status">iniciando…</span><span id="motion" class="chip">Movimiento: …</span></p>
+</header>
+<aside>
+  <div class="tabs"><button id="tabNet" class="on">Mi red<span class="n" id="nNet">–</span></button><button id="tabWifi">WiFi<span class="n" id="nWifi">–</span></button><button id="tabBt">Bluetooth<span class="n" id="nBt">–</span></button><button id="tabHist">Historial</button></div>
+  <h2 id="h2">EN TU RED AHORA</h2>
+  <div id="count">0<span>dispositivos</span></div>
+  <input id="q" type="search" placeholder="Buscar por nombre, IP o MAC…" autocomplete="off" aria-label="Buscar dispositivos">
+  <div id="list"></div>
+  <footer id="foot">La distancia al centro se calcula con la latencia (ping). Es una posición simbólica, no la ubicación física.</footer>
+</aside>
+<div id="alert"></div>
+<div id="tip"></div>
+<div id="hint">arrastra para girar · rueda para acercar · clic en un punto para renombrarlo</div>
+<div id="hist"></div>
+<div id="offBadge">RADAR APAGADO<small>no se está escaneando nada · pulsa «Encender radar»</small></div>
+<div id="bar">
+  <button id="power" title="Apaga o prende todos los escaneos (red, WiFi y Bluetooth)"><i class="led"></i><span id="powerTxt">Apagar radar</span></button>
+  <button id="bCal" title="Volver a medir la señal normal (úsalo si cambiaste algo de lugar)"><span class="ic">◎</span>Recalibrar</button>
+  <button id="bView" title="Volver a la vista inicial"><span class="ic">⟲</span>Centrar</button>
+  <button id="bSpin" class="tg on" title="Giro automático de la cámara"><span class="ic">↻</span>Giro</button>
+  <button id="bSnd" class="tg on" title="Sonido de alerta"><span class="ic">♪</span>Sonido</button>
+  <button id="bFull" title="Pantalla completa"><span class="ic">⛶</span>Pantalla</button>
+</div>
+<div id="err">No se puede conectar con el escáner.<br>¿Está corriendo <b>python server.py</b>?</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+(() => {
+  const R = 4.2;
+  const COL = { online: 0x38f2a6, idle: 0xf5b942, router: 0x4cc9ff, self: 0xb794ff, alert: 0xff5d73 };
+  const css = (n) => '#' + n.toString(16).padStart(6, '0');
+
+  // ---------- escena ----------
+  const canvas = document.getElementById('c');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x04090d, 0.045);
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+  const target = new THREE.Vector3(0, 0.7, 0);
+  const orbit = { theta: 0.7, phi: 1.05, dist: 17 };
+  let intro = true;  // la cámara se acerca sola al abrir la página
+
+  function placeCamera() {
+    const s = Math.sin(orbit.phi);
+    camera.position.set(
+      target.x + orbit.dist * s * Math.sin(orbit.theta),
+      target.y + orbit.dist * Math.cos(orbit.phi),
+      target.z + orbit.dist * s * Math.cos(orbit.theta));
+    camera.lookAt(target);
+  }
+  function resize() {
+    renderer.setSize(innerWidth, innerHeight);
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+  }
+  addEventListener('resize', resize); resize();
+
+  const lineMat = (c, o) => new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: o });
+  const grid = new THREE.Group(); scene.add(grid);
+
+  // anillos de distancia + cruz
+  for (let i = 1; i <= 4; i++) {
+    const r = (R / 4) * i, pts = [];
+    for (let a = 0; a <= 128; a++) pts.push(new THREE.Vector3(Math.cos(a / 128 * Math.PI * 2) * r, 0, Math.sin(a / 128 * Math.PI * 2) * r));
+    grid.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat(0x38f2a6, i === 4 ? 0.55 : 0.25)));
+  }
+  for (let k = 0; k < 8; k++) {
+    const a = k * Math.PI / 4;
+    grid.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(
+      [new THREE.Vector3(0, 0, 0), new THREE.Vector3(Math.cos(a) * R, 0, Math.sin(a) * R)]), lineMat(0x38f2a6, 0.12)));
+  }
+  // semiesfera de alambre (arcos verticales) para dar sensación 3D
+  for (let k = 0; k < 6; k++) {
+    const a = k * Math.PI / 6, pts = [];
+    for (let e = 0; e <= 48; e++) {
+      const el = e / 48 * Math.PI;
+      pts.push(new THREE.Vector3(Math.cos(a) * Math.cos(el) * R, Math.sin(el) * R * 0.55, Math.sin(a) * Math.cos(el) * R));
+    }
+    grid.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat(0x38f2a6, 0.07)));
+  }
+  // marcadores de distancia
+  const labels = document.getElementById('labels');
+  const ringLabels = [];
+  ['25%', '50%', '75%', 'borde'].forEach((t, i) => {
+    const el = document.createElement('div'); el.className = 'lbl'; el.style.color = '#3f6b60'; el.style.fontSize = '9px';
+    el.textContent = t; labels.appendChild(el);
+    ringLabels.push({ el, pos: new THREE.Vector3((R / 4) * (i + 1), 0, 0) });
+  });
+
+  // barrido (fan translúcido)
+  const sweep = new THREE.Group(); scene.add(sweep);
+  {
+    const seg = 28, span = 1.0, pos = [], col = [];
+    for (let i = 0; i < seg; i++) {
+      const a0 = -i / seg * span, a1 = -(i + 1) / seg * span;
+      const al0 = 0.34 * (1 - i / seg), al1 = 0.34 * (1 - (i + 1) / seg);
+      pos.push(0, 0, 0, Math.cos(a0) * R, 0, Math.sin(a0) * R, Math.cos(a1) * R, 0, Math.sin(a1) * R);
+      col.push(.22, .95, .65, al0 * .3, .22, .95, .65, al0, .22, .95, .65, al1);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
+    sweep.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({
+      vertexColors: true, transparent: true, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })));
+    sweep.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(R, 0, 0)]), lineMat(0x7dffd0, 0.9)));
+  }
+
+  // suelo luminoso (degradado radial)
+  {
+    const c = document.createElement('canvas'); c.width = c.height = 256;
+    const x = c.getContext('2d'), g = x.createRadialGradient(128, 128, 0, 128, 128, 128);
+    g.addColorStop(0, 'rgba(56,242,166,0.26)'); g.addColorStop(0.55, 'rgba(56,242,166,0.07)'); g.addColorStop(1, 'rgba(56,242,166,0)');
+    x.fillStyle = g; x.fillRect(0, 0, 256, 256);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(R * 2.2, R * 2.2).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    m.position.y = -0.01; scene.add(m);
+  }
+  // polvo flotante para dar profundidad
+  const dust = (() => {
+    const n = 280, p = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * R * 1.35;
+      p[i * 3] = Math.cos(a) * r; p[i * 3 + 1] = Math.random() * 3.2; p[i * 3 + 2] = Math.sin(a) * r;
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p, 3));
+    const pts = new THREE.Points(g, new THREE.PointsMaterial({ color: 0x7dffd0, size: 0.035, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending }));
+    scene.add(pts); return pts;
+  })();
+  let nextPing = 0; const pings = [];
+
+  // router en el centro
+  const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.16),
+    new THREE.MeshBasicMaterial({ color: COL.router, wireframe: true }));
+  core.position.y = 0.35; core.visible = false; scene.add(core);
+  const coreGlow = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 16), new THREE.MeshBasicMaterial({ color: COL.router }));
+  coreGlow.position.y = 0.35; scene.add(coreGlow);
+
+  // ---------- dispositivos ----------
+  const nodes = new Map();   // mac -> node
+  const pulses = [];
+  const sphereGeo = new THREE.SphereGeometry(1, 20, 20);
+  let first = true, hover = null, lastData = null;
+
+  function hash(str, salt) {
+    let h = 2166136261 ^ salt;
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return ((h >>> 0) % 10000) / 10000;
+  }
+  function targetFor(d) {
+    if (d.wifi) {  // más señal = más cerca del centro (tu laptop)
+      const a = hash(d.mac, 1) * Math.PI * 2, r = 1.0 + (1 - d.wifi.signal / 100) * (R - 1.5);
+      return new THREE.Vector3(Math.cos(a) * r, 0.25 + hash(d.mac, 7) * 1.6, Math.sin(a) * r);
+    }
+    if (d.bt) {  // alrededor: por distancia estimada; conectados cerca del centro, emparejados sin conexión más afuera
+      const a = hash(d.mac, 1) * Math.PI * 2;
+      const r = d.bt.nearby ? 1.0 + Math.min(d.bt.dist_m / 15, 1) * (R - 1.5) : d.bt.connected ? 2.4 : R - 1.2;
+      return new THREE.Vector3(Math.cos(a) * r, 0.25 + hash(d.mac, 7) * 1.6, Math.sin(a) * r);
+    }
+    if (d.is_gateway) return new THREE.Vector3(0, 0.35, 0);
+    const ang = hash(d.mac === 'self' ? d.ip : d.mac, 1) * Math.PI * 2;
+    const rtt = d.rtt == null ? 30 : Math.min(d.rtt, 30);
+    const r = 1.0 + (rtt / 30) * (R - 1.5);
+    const y = 0.25 + hash(d.mac === 'self' ? d.ip : d.mac, 7) * 1.6;
+    return new THREE.Vector3(Math.cos(ang) * r, y, Math.sin(ang) * r);
+  }
+  const colorOf = (d) => d.wifi ? (d.wifi.moving ? COL.alert : d.wifi.own ? COL.router : d.wifi.signal >= 55 ? COL.online : d.wifi.signal >= 30 ? COL.idle : 0x6a8f99) : d.known === false ? COL.alert : d.is_gateway ? COL.router : d.is_self ? COL.self : (d.online && d.activity !== 'reposo') ? COL.online : COL.idle;
+
+  // ---------- íconos 3D por tipo de dispositivo (holograma: relleno tenue + aristas) ----------
+  function iconKey(d) {
+    if (d.wifi) return /dron|drone/i.test(d.name) ? 'drone' : 'ap';
+    if (d.bt) return d.bt.kind === 'phone' ? 'phone' : d.bt.kind === 'tablet' ? 'tablet' : 'unknown';
+    if (d.is_gateway) return 'router';
+    if (d.is_self) return 'laptop';
+    if (/tablet|ipad/i.test(d.name)) return 'tablet';
+    if (/cel|phone|m[óo]vil|movil|tel[ée]fono/i.test(d.name)) return 'phone';
+    const k = d.kind || '';
+    if (k.startsWith('iPhone')) return 'phone';
+    if (k.startsWith('Chromecast')) return 'tv';
+    if (k.startsWith('PC')) return 'pc';
+    if (k.startsWith('Linux')) return 'server';
+    return 'unknown';
+  }
+  const ICON_SIZE = { phone: 1, tablet: 1, tv: 0.9, pc: 0.9, laptop: 0.95, server: 0.9, router: 1.5, drone: 1.1, unknown: 1 };
+
+  function buildIcon(key, color) {
+    const group = new THREE.Group(), mats = [];
+    const box = (w, h, dp, x = 0, y = 0, z = 0) => part(new THREE.BoxGeometry(w, h, dp), x, y, z);
+    function part(geo, x = 0, y = 0, z = 0) {
+      const fill = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28, depthWrite: false });
+      const line = new THREE.LineBasicMaterial({ color, transparent: true });
+      const m = new THREE.Mesh(geo, fill), e = new THREE.LineSegments(new THREE.EdgesGeometry(geo), line);
+      m.position.set(x, y, z); e.position.set(x, y, z);
+      group.add(m, e); mats.push({ fill, line });
+    }
+    switch (key) {
+      case 'phone':  box(0.5, 1, 0.08); box(0.4, 0.82, 0.09, 0, 0.02, 0); break;
+      case 'tablet': box(0.95, 0.7, 0.07); box(0.82, 0.57, 0.08); break;
+      case 'tv':     box(1.4, 0.8, 0.08, 0, 0.12, 0); box(0.08, 0.2, 0.08, 0, -0.38, 0); box(0.5, 0.05, 0.25, 0, -0.5, 0); break;
+      case 'pc':     box(1, 0.65, 0.06, 0, 0.17, 0); box(0.08, 0.2, 0.08, 0, -0.25, 0); box(0.4, 0.05, 0.25, 0, -0.37, 0); break;
+      case 'laptop':
+        box(1, 0.05, 0.7, 0, -0.3, 0);
+        part(new THREE.BoxGeometry(1, 0.65, 0.04).translate(0, 0.325, 0).rotateX(-0.3), 0, -0.28, -0.33);
+        break;
+      case 'server': box(0.8, 0.22, 0.6, 0, -0.3, 0); box(0.8, 0.22, 0.6, 0, 0, 0); box(0.8, 0.22, 0.6, 0, 0.3, 0); break;
+      case 'router':
+        box(1, 0.16, 0.6, 0, -0.25, 0); box(0.05, 0.7, 0.05, -0.4, 0.15, -0.2); box(0.05, 0.7, 0.05, 0.4, 0.15, -0.2);
+        box(0.05, 0.6, 0.05, 0, 0.1, -0.22); break;
+      case 'ap':  // símbolo de WiFi: punto + 3 arcos
+        part(new THREE.OctahedronGeometry(0.09), 0, -0.4, 0);
+        for (const r of [0.3, 0.55, 0.8]) part(new THREE.TorusGeometry(r, 0.03, 4, 28, Math.PI), 0, -0.4, 0);
+        break;
+      case 'drone':  // cuerpo central + 4 brazos con hélices
+        box(0.3, 0.12, 0.3, 0, 0, 0);
+        for (const [x, z] of [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]]) {
+          part(new THREE.CylinderGeometry(0.03, 0.03, 0.18, 6), x, 0.0, z);
+          part(new THREE.TorusGeometry(0.22, 0.02, 4, 20).rotateX(Math.PI / 2), x, 0.12, z);
+        }
+        part(new THREE.CylinderGeometry(0.02, 0.02, 1.4, 4).rotateZ(Math.PI / 2).rotateY(Math.PI / 4), 0, 0, 0);
+        part(new THREE.CylinderGeometry(0.02, 0.02, 1.4, 4).rotateZ(Math.PI / 2).rotateY(-Math.PI / 4), 0, 0, 0);
+        break;
+      default: part(new THREE.OctahedronGeometry(0.5));
+    }
+    return {
+      group, size: ICON_SIZE[key] || 1,
+      setColor(c) { for (const m of mats) { m.fill.color.setHex(c); m.line.color.setHex(c); } },
+      setOpacity(o) { for (const m of mats) { m.fill.opacity = 0.28 * o; m.line.opacity = o; } },
+      dispose() { group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); },
+    };
+  }
+
+  function makeNode(d, announce) {
+    const color = colorOf(d), g = new THREE.Group();
+    const key = iconKey(d), icon = buildIcon(key, color);
+    const halo = new THREE.Mesh(sphereGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false }));
+    const stem = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, -1, 0)]),
+      new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.35 }));
+    const foot = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.13, 24).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, side: THREE.DoubleSide }));
+    g.add(icon.group, halo, stem, foot); scene.add(g);
+    let link = null;  // línea tenue desde el centro (router o tu laptop) hasta el equipo
+    if (!d.is_gateway && !d.wifi) {
+      link = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.35, 0), new THREE.Vector3(0, 0.35, 0)]),
+        new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.2, depthWrite: false }));
+      scene.add(link);
+    }
+    const el = document.createElement('div'); el.className = 'lbl'; labels.appendChild(el);
+    const n = { d, g, icon, key, halo, stem, foot, el, goal: targetFor(d), flash: 0, phase: Math.random() * 6, fade: announce ? 0 : 1, dying: false };
+    g.position.copy(n.goal); n.link = link;
+    if (!d.is_gateway && announce) spawnPulse(n.goal, color);
+    return n;
+  }
+  function spawnPulse(p, color) {
+    const m = new THREE.Mesh(new THREE.RingGeometry(0.95, 1, 48).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
+    m.position.set(p.x, 0.01, p.z); scene.add(m); pulses.push({ m, t: 0 });
+  }
+  function disposeNode(n) {
+    scene.remove(n.g); n.el.remove();
+    if (n.link) { scene.remove(n.link); n.link.geometry.dispose(); n.link.material.dispose(); }
+    n.g.traverse(o => { if (o.geometry && o.geometry !== sphereGeo) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+  }
+
+  function applyData(data) {
+    lastData = data;
+    const seen = new Set();
+    for (const d of data.devices) {
+      seen.add(d.mac);
+      let n = nodes.get(d.mac);
+      if (!n) { n = makeNode(d, !first); nodes.set(d.mac, n); }
+      n.d = d; n.goal = targetFor(d); n.dying = false;
+      const c = colorOf(d);
+      const k = iconKey(d);
+      if (k !== n.key) { n.g.remove(n.icon.group); n.icon.dispose(); n.icon = buildIcon(k, c); n.key = k; n.g.add(n.icon.group); }
+      n.icon.setColor(c); n.halo.material.color.setHex(c);
+      n.stem.material.color.setHex(c); n.foot.material.color.setHex(c);
+    }
+    for (const [mac, n] of nodes) if (!seen.has(mac)) n.dying = true;
+    first = false;
+    renderList(data);
+    renderAlert(data);
+    const online = data.devices.filter(d => d.online || d.is_gateway).length;
+    const upd = data.scanned_at ? 'actualizado ' + new Date(data.scanned_at * 1000).toLocaleTimeString() : 'buscando…';
+    if (mode === 'bt') {
+      document.getElementById('status').textContent = `${data.adapter || 'Bluetooth de la laptop'} · ${upd}`;
+      const con = data.devices.filter(d => d.bt.connected).length;
+      const near = data.devices.filter(d => d.bt.nearby).length;
+      document.getElementById('count').innerHTML = `${data.devices.length - near}<span>emparejados · ${con} conectados · ${near} alrededor</span>`;
+    } else if (mode === 'wifi') {
+      document.getElementById('status').textContent = `WiFis visibles desde tu laptop · ${upd}`;
+      const own = data.devices.filter(d => d.wifi.own).length;
+      document.getElementById('count').innerHTML = `${data.devices.length}<span>redes · ${own} tuyas</span>`;
+    } else {
+      document.getElementById('status').textContent =
+        `${data.subnet || '—'} · ${data.scanning ? 'escaneando…' : upd}`;
+      document.getElementById('count').innerHTML = `${data.devices.length}<span>dispositivos · ${online} en línea · ${data.devices.filter(d => d.activity === 'activo').length} despiertos</span>`;
+    }
+  }
+
+  // ---------- modos: mi red / WiFis cercanos ----------
+  let mode = 'net';
+  const qualityOf = (s) => s >= 70 ? 'excelente' : s >= 50 ? 'buena' : s >= 30 ? 'regular' : 'débil';
+  function normalizeWifi(w) {
+    for (const a of w.aps) { a.band = (a.band || '').replace(/[^\x20-\x7e]+/g, ' '); a.radio = (a.radio || '').replace(/[^\x20-\x7e]+/g, ' '); }
+    return {
+      scanned_at: w.scanned_at, scanning: false, subnet: null, alerts: w.alerts, advice: w.advice,
+      devices: w.aps.map(a => ({
+        mac: a.bssid, ip: `canal ${a.channel || '?'} · ${a.band || ''}`, name: a.label || a.ssid || '(red oculta)', custom_name: !!a.label,
+        vendor: '', kind: 'WiFi', rtt: null, online: true, is_gateway: false, is_self: false, first_seen: 0, wifi: a })),
+    };
+  }
+  const BT_KIND = { phone: 'celular', tablet: 'tablet', mouse: 'mouse', audio: 'audífonos / parlante', keyboard: 'teclado', watch: 'reloj', other: 'Bluetooth' };
+  function normalizeBt(b) {
+    const paired = b.devices.map(x => ({
+      mac: 'bt:' + x.mac, ip: x.connected ? 'conectado ahora' : 'emparejado', name: x.name, custom_name: false,
+      vendor: '', kind: BT_KIND[x.kind] || 'Bluetooth', rtt: null, online: x.connected,
+      activity: x.connected ? 'activo' : 'reposo', is_gateway: false, is_self: false, first_seen: 0, bt: x }));
+    const nearby = (b.nearby || []).map(x => {
+      const maker = x.maker || (x.company >= 0 ? 'fabricante #' + x.company : 'sin identificar');
+      return {
+        mac: 'ble:' + x.addr, ip: `~${x.dist_m} m`, name: x.name || `${maker} · ${x.addr.slice(-4)}`, custom_name: false,
+        vendor: '', kind: 'Bluetooth cercano', rtt: null, online: true, activity: 'activo', is_gateway: false, is_self: false, first_seen: 0,
+        bt: { nearby: true, connected: false, macs: [x.addr], kind: 'other', rssi: x.rssi, dist_m: x.dist_m, maker, random: x.addrType === 'Random' } };
+    });
+    return { scanned_at: b.scanned_at, scanning: false, subnet: null, adapter: b.adapter, nearbyError: b.nearby_error, devices: [...paired, ...nearby] };
+  }
+  function setMode(m) {
+    if (m === mode) return;
+    mode = m;
+    for (const n of nodes.values()) disposeNode(n);
+    nodes.clear(); first = true; hover = null;
+    document.getElementById('tabNet').classList.toggle('on', m === 'net');
+    document.getElementById('tabWifi').classList.toggle('on', m === 'wifi');
+    document.getElementById('tabBt').classList.toggle('on', m === 'bt');
+    document.getElementById('tabHist').classList.toggle('on', m === 'hist');
+    document.body.classList.toggle('hist', m === 'hist');
+    document.getElementById('h2').textContent = m === 'net' ? 'EN TU RED AHORA' : m === 'bt' ? 'BLUETOOTH DE TU LAPTOP' : m === 'hist' ? 'QUIÉN ESTUVO EN TU RED' : 'WIFIS A TU ALREDEDOR';
+    document.getElementById('foot').textContent = m === 'hist'
+      ? 'Se guarda solo cuándo se conectó y desconectó cada equipo, sin tráfico ni páginas. Mientras el radar está apagado no se anota nada.'
+      : m === 'net'
+      ? 'La distancia al centro se calcula con la latencia (ping). Es una posición simbólica, no la ubicación física.'
+      : m === 'bt'
+      ? 'Centro = tu laptop. Incluye los emparejados con ella (conectados cerca del centro) y los Bluetooth LE que andan en el aire a tu alrededor, ubicados por la fuerza de su señal. Muchos celulares y relojes cambian de dirección a propósito, así que pueden repetirse o desaparecer.'
+      : 'Centro = tu laptop. Más señal = más cerca. Los metros son una estimación por la señal (±varios metros). Con redes ajenas no hay latencia: solo señal.';
+    coreGlow.material.color.setHex(m === 'net' ? COL.router : COL.self);  // wifi y bluetooth: el centro eres tú
+    centerLbl.style.display = (m === 'wifi' || m === 'bt') ? 'block' : 'none';
+    poll();
+  }
+  document.getElementById('tabBt').onclick = () => setMode('bt');
+  document.getElementById('tabNet').onclick = () => setMode('net');
+  document.getElementById('tabWifi').onclick = () => setMode('wifi');
+  const centerLbl = document.createElement('div'); centerLbl.className = 'lbl'; centerLbl.style.color = css(COL.self);
+  centerLbl.textContent = 'Tú (laptop)'; centerLbl.style.display = 'none'; labels.appendChild(centerLbl);
+
+  function rename(d) {
+    if (d.bt || d.mac === 'self') return;
+    const v = prompt(`Nombre para ${d.ip} (${d.mac}).\nDéjalo vacío para quitar el nombre.`, d.custom_name ? d.name : '');
+    if (v === null) return;
+    fetch('/api/rename', { method: 'POST', body: JSON.stringify({ mac: d.mac, name: v }) }).then(poll);
+  }
+
+  // ---------- alertas de dispositivo nuevo ----------
+  const alerted = new Set();
+  function beep() {
+    if (!soundOn) return;
+    try {
+      const a = new (window.AudioContext || window.webkitAudioContext)(), o = a.createOscillator(), g = a.createGain();
+      o.frequency.value = 880; g.gain.value = 0.05; o.connect(g); g.connect(a.destination); o.start();
+      setTimeout(() => { o.stop(); a.close(); }, 250);
+    } catch (e) { /* el navegador puede bloquear el sonido hasta que hagas clic en la página */ }
+  }
+  function trust(body) { return fetch('/api/trust', { method: 'POST', body: JSON.stringify(body) }).then(poll); }
+  function renderAlert(data) {
+    const box = document.getElementById('alert');
+    const unk = mode === 'net' ? data.devices.filter(d => d.known === false) : [];
+    if (!unk.length) { box.style.display = 'none'; document.title = 'WiFi Radar'; return; }
+    if (unk.some(d => !alerted.has(d.mac))) { beep(); unk.forEach(d => alerted.add(d.mac)); }
+    document.title = `⚠ ${unk.length} nuevo(s) · WiFi Radar`;
+    box.innerHTML = ''; box.style.display = 'block';
+    const h = document.createElement('div');
+    h.innerHTML = `<b>⚠ ${unk.length === 1 ? 'Dispositivo nuevo' : unk.length + ' dispositivos nuevos'} en tu red</b> — no estaba(n) en tu lista de confianza.`;
+    box.appendChild(h);
+    for (const d of unk) {
+      const line = document.createElement('div'); line.style.marginTop = '6px';
+      line.append(`${d.name} · ${d.ip} · ${d.mac}`);
+      const b = document.createElement('button'); b.textContent = 'Confiar'; b.onclick = () => trust({ mac: d.mac });
+      line.appendChild(b); box.appendChild(line);
+    }
+    if (unk.length > 1) {
+      const b = document.createElement('button'); b.textContent = 'Confiar en todos'; b.style.margin = '8px 0 0';
+      b.onclick = () => trust({ all: true }); box.appendChild(b);
+    }
+  }
+
+  function renderList(data) {
+    const list = document.getElementById('list'); list.innerHTML = '';
+    if (mode === 'wifi') {
+      const cards = [
+        ...(data.alerts || []).map(a => ({ cls: a.level, t: a.title, x: a.text })),
+        ...(data.advice || []).map(a => ({ cls: a.change ? 'media' : 'ok', t: `Canal · ${a.band}`, x: a.text })),
+      ];
+      for (const c of cards) {
+        const el = document.createElement('div'); el.className = 'card ' + c.cls;
+        const b = document.createElement('b'); b.textContent = c.t;
+        const p = document.createElement('div'); p.textContent = c.x;
+        el.append(b, p); list.appendChild(el);
+      }
+    }
+    const q = (document.getElementById('q').value || '').trim().toLowerCase();
+    for (const d of data.devices) {
+      if (q && !`${d.name} ${d.ip} ${d.mac} ${d.kind || ''} ${d.vendor || ''}`.toLowerCase().includes(q)) continue;
+      const row = document.createElement('div'); row.className = 'row'; row.dataset.mac = d.mac;
+      const ACT = { activo: 'activo (despierto)', reposo: 'en reposo', dormido: 'sin respuesta', midiendo: 'midiendo…' };
+      const status = d.is_gateway ? 'router' : d.is_self ? 'esta laptop' : (ACT[d.activity] || (d.online ? 'activo' : 'sin respuesta'));
+      const dot = document.createElement('i'); dot.className = 'dot'; dot.style.color = css(colorOf(d));
+      const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = d.name;
+      const ms = document.createElement('span'); ms.className = 'ms'; ms.textContent = d.rtt == null ? '—' : (d.rtt < 1 ? '<1 ms' : d.rtt + ' ms');
+      const sub = document.createElement('span'); sub.className = 'sub'; sub.textContent = `${d.ip} · ${status}${d.kind && !d.is_gateway ? ' · ' + d.kind : ''} · ${d.vendor}`;
+      if (d.wifi) {
+        const w = d.wifi;
+        ms.textContent = w.signal + '%';
+        sub.textContent = `~${w.dist_m} m · señal ${qualityOf(w.signal)} · canal ${w.channel || '?'} · ${w.band || ''}` +
+          (w.stations != null ? ` · ${w.stations} equipos` : '') + ` · ${w.security}` + (w.own ? ' · TU ROUTER' : '');
+        if (w.risk === 'alta') sub.style.color = '#ff8a9a';
+      }
+      if (d.bt) {
+        if (d.bt.nearby) {
+          ms.textContent = d.bt.rssi + ' dBm';
+          sub.textContent = `~${d.bt.dist_m} m · ${d.bt.maker}${d.bt.random ? ' · dirección cambiante' : ''}`;
+        } else {
+          ms.textContent = d.bt.connected ? 'conectado' : 'apagado / lejos';
+          sub.textContent = `${d.kind} · ${d.bt.macs.map(m => m.match(/../g).join(':')).join(' / ')}`;
+        }
+      }
+      row.append(dot, nm, ms, sub);
+      if (d.known === false) {
+        nm.textContent = '⚠ NUEVO · ' + d.name; nm.style.color = '#ff8a9a';
+        const b = document.createElement('button'); b.className = 'trust'; b.textContent = 'Confiar en este equipo';
+        b.onclick = (e) => { e.stopPropagation(); trust({ mac: d.mac }); };
+        row.appendChild(b);
+      }
+      row.onclick = () => rename(d);
+      row.onmouseenter = () => { hover = d.mac; };
+      row.onmouseleave = () => { hover = null; };
+      list.appendChild(row);
+    }
+  }
+
+  async function poll() {
+    const m = mode;
+    try {
+      if (m === 'hist') {
+        const hj = await (await fetch('/api/history?day=' + histDay, { cache: 'no-store' })).json();
+        if (m !== mode) return;
+        $('list').innerHTML = '';
+        renderHist(hj); updateMotion(hj.motion); setPower(hj.radar_on !== false);
+        document.getElementById('err').style.display = 'none';
+        return;
+      }
+      const r = await fetch(m === 'net' ? '/api/devices' : m === 'bt' ? '/api/bluetooth' : '/api/wifi', { cache: 'no-store' });
+      const j = await r.json();
+      if (m !== mode) return;  // el usuario cambió de modo mientras llegaba la respuesta
+      const norm = m === 'net' ? j : m === 'bt' ? normalizeBt(j) : normalizeWifi(j);
+      applyData(norm);
+      const nm = m === 'bt' ? norm.devices.filter(d => !d.bt.nearby).length : norm.devices.length;
+      document.getElementById(m === 'net' ? 'nNet' : m === 'bt' ? 'nBt' : 'nWifi').textContent = nm;
+      setPower(j.radar_on !== false);
+      updateMotion(j.motion);
+      document.getElementById('err').style.display = 'none';
+    } catch (e) {
+      document.getElementById('err').style.display = 'block';
+      document.getElementById('status').textContent = 'sin conexión con el escáner';
+    }
+  }
+  // ---------- botones ----------
+  const store = { get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v === '1'; } catch (e) { return d; } },
+                  set(k, v) { try { localStorage.setItem(k, v ? '1' : '0'); } catch (e) { /* sin almacenamiento: no pasa nada */ } } };
+  let radarOn = true, autoSpin = store.get('spin', true), soundOn = store.get('snd', true);
+  const $ = (id) => document.getElementById(id);
+  function setPower(on) {
+    radarOn = on;
+    document.body.classList.toggle('off', !on);
+    $('power').classList.toggle('off', !on);
+    $('powerTxt').textContent = on ? 'Apagar radar' : 'Encender radar';
+    if (!on) $('status').textContent = 'radar apagado · sin escanear';
+  }
+  $('power').onclick = async () => {
+    const want = !radarOn; setPower(want);
+    try { await fetch('/api/power', { method: 'POST', body: JSON.stringify({ on: want }) }); } catch (e) { setPower(!want); }
+    if (want) poll();
+  };
+  const syncToggles = () => { $('bSpin').classList.toggle('on', autoSpin); $('bSnd').classList.toggle('on', soundOn); };
+  $('bSpin').onclick = () => { autoSpin = !autoSpin; store.set('spin', autoSpin); syncToggles(); };
+  $('bSnd').onclick = () => { soundOn = !soundOn; store.set('snd', soundOn); syncToggles(); if (soundOn) beep(); };
+  $('bView').onclick = () => { orbit.theta = 0.7; orbit.phi = 1.05; orbit.dist = 9.5; intro = false; };
+  $('bFull').onclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => {}); };
+  $('q').addEventListener('input', () => { if (lastData && mode !== 'hist') renderList(lastData); });
+  syncToggles();
+
+  // ---------- movimiento ----------
+  let wasMoving = false;
+  function updateMotion(m) {
+    if (!m) return;
+    const c = $('motion'); c.className = 'chip ' + m.status;
+    c.textContent = m.status === 'calibrando' ? `Movimiento: calibrando ${m.progress}/${m.total}`
+      : m.status === 'movimiento' ? `⚠ MOVIMIENTO · ${m.moving.length} redes variaron`
+      : `Movimiento: calma · vigilando ${m.watching} redes`;
+    c.title = 'Detecta cambios en la señal de varias redes WiFi a la vez. Es aproximado: puede ser una persona, una puerta o un microondas.';
+    if (m.status === 'movimiento' && !wasMoving) beep();
+    wasMoving = m.status === 'movimiento';
+  }
+  $('bCal').onclick = () => fetch('/api/motion/reset', { method: 'POST', body: '{}' }).then(poll);
+
+  // ---------- historial ----------
+  let histDay = 0;
+  const hhm = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const hdur = (s) => { const m = Math.round(s / 60), h = Math.floor(m / 60); return h ? `${h} h ${m % 60} min` : `${m} min`; };
+  const mk = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  function renderHist(j) {
+    const box = $('hist'); box.innerHTML = '';
+    const head = mk('div', 'hhead');
+    head.append(mk('b', '', new Date(j.day_start * 1000).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })));
+    for (const [lbl, n] of [['Hoy', 0], ['Ayer', 1], ['Hace 2 días', 2], ['Hace 3 días', 3]]) {
+      const b = mk('button', n === histDay ? 'on' : '', lbl); b.onclick = () => { histDay = n; poll(); }; head.append(b);
+    }
+    box.append(head);
+    const axis = mk('div', 'axis'); axis.append(mk('span'), mk('div'), mk('i', '', '0'));
+    for (const h of ['0 h', '6 h', '12 h', '18 h', '24 h']) axis.children[1].append(mk('span', '', h));
+    box.append(axis);
+    const span = j.day_end - j.day_start;
+    if (!j.devices.length) box.append(mk('div', 'hnote', 'Todavía no hay datos de este día. El historial se llena mientras el radar está encendido.'));
+    for (const d of j.devices) {
+      const row = mk('div', 'hrow');
+      const hn = mk('div', 'hn', d.name); if (d.present_now) hn.append(mk('em', '', '● en la red'));
+      const strip = mk('div', 'strip');
+      for (const [s, e] of d.segments) {
+        const seg = mk('i', 'seg'); seg.style.left = ((s - j.day_start) / span * 100) + '%';
+        seg.style.width = Math.max((e - s) / span * 100, 0.4) + '%'; seg.title = `${hhm(s)} – ${hhm(e)}`; strip.append(seg);
+      }
+      if (histDay === 0) { const nw = mk('i', 'now'); nw.style.left = ((j.now - j.day_start) / span * 100) + '%'; strip.append(nw); }
+      row.append(hn, strip, mk('div', 'ht', hdur(d.total)),
+        mk('div', 'hs', `llegó ${hhm(d.first)} · ${d.present_now ? 'sigue conectado' : 'última vez ' + hhm(d.last)} · ${d.segments.length} conexión${d.segments.length === 1 ? '' : 'es'}`));
+      box.append(row);
+    }
+    if (j.events.length) {
+      const ev = mk('div', 'hev'); ev.append(mk('b', '', 'Movimiento detectado'));
+      for (const e of j.events) ev.append(mk('div', e.kind, `${hhm(e.ts)} · ${e.text}`));
+      box.append(ev);
+    }
+    box.append(mk('div', 'hnote', 'Cómo leerlo: la barra muestra cuándo cada equipo estuvo conectado a tu WiFi. Es el equipo, no la persona: si alguien deja el celular en casa, sigue contando. ' +
+      'Un celular en reposo puede tardar unos minutos en notarse al llegar o al irse.'));
+    $('count').innerHTML = `${j.devices.length}<span>equipos vistos · ${j.devices.filter(d => d.present_now).length} conectados ahora</span>`;
+    $('status').textContent = 'historial · ' + new Date(j.day_start * 1000).toLocaleDateString();
+  }
+  $('tabHist').onclick = () => setMode('hist');
+
+  poll(); setInterval(poll, 2000);
+
+  // ---------- interacción ----------
+  let drag = null, mouse = { x: -999, y: -999 };
+  canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, moved: false }; canvas.classList.add('drag'); canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', e => {
+    mouse.x = e.clientX; mouse.y = e.clientY;
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+    orbit.theta -= dx * 0.006; orbit.phi = Math.min(1.5, Math.max(0.15, orbit.phi - dy * 0.006));
+    drag.x = e.clientX; drag.y = e.clientY;
+  });
+  canvas.addEventListener('pointerup', () => {
+    canvas.classList.remove('drag');
+    if (drag && !drag.moved && hover && lastData) { const d = lastData.devices.find(x => x.mac === hover); if (d) rename(d); }
+    drag = null;
+  });
+  canvas.addEventListener('wheel', e => { e.preventDefault(); intro = false; orbit.dist = Math.min(18, Math.max(4, orbit.dist * (1 + e.deltaY * 0.001))); }, { passive: false });
+
+  const v3 = new THREE.Vector3();
+  function toScreen(p) {
+    v3.copy(p).project(camera);
+    return { x: (v3.x * 0.5 + 0.5) * innerWidth, y: (-v3.y * 0.5 + 0.5) * innerHeight, vis: v3.z < 1 };
+  }
+
+  // ---------- bucle ----------
+  const clock = new THREE.Clock();
+  const tip = document.getElementById('tip');
+  let sweepAng = 0;
+  function frame() {
+    const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
+    if (!drag && autoSpin) orbit.theta += dt * 0.04;
+    if (intro) orbit.dist += (9.5 - orbit.dist) * Math.min(1, dt * 1.6);
+    placeCamera();
+
+    const prev = sweepAng; if (radarOn) sweepAng = (sweepAng + dt * 1.1) % (Math.PI * 2);
+    sweep.rotation.y = -sweepAng;
+    core.rotation.y = t * 0.8; core.rotation.x = t * 0.5;
+    coreGlow.scale.setScalar(1 + Math.sin(t * 3) * 0.25);
+
+    let best = null, bestDist = 22;
+    for (const [mac, n] of nodes) {
+      n.g.position.lerp(n.goal, Math.min(1, dt * 3));
+      n.icon.group.position.y = n.d.is_gateway ? 0 : Math.sin(t * 1.6 + n.phase) * 0.05;  // flotan suavemente
+      if (n.link) {
+        const pa = n.link.geometry.attributes.position;
+        pa.setXYZ(1, n.g.position.x, n.g.position.y, n.g.position.z); pa.needsUpdate = true;
+        n.link.material.color.setHex(colorOf(n.d));
+        n.link.material.opacity = n.fade * (n.d.known === false ? 0.6 : n.d.activity === 'activo' ? 0.3 : 0.1);
+      }
+      n.fade += ((n.dying ? 0 : 1) - n.fade) * Math.min(1, dt * 3);
+      if (n.dying && n.fade < 0.03) { disposeNode(n); nodes.delete(mac); continue; }
+
+      // ¿el barrido acaba de pasar por este punto?
+      const a = (Math.atan2(n.g.position.z, n.g.position.x) + Math.PI * 2) % (Math.PI * 2);
+      const hit = prev <= sweepAng ? (a >= prev && a < sweepAng) : (a >= prev || a < sweepAng);
+      if (hit && !n.d.is_gateway) n.flash = 1;
+      n.flash = Math.max(0, n.flash - dt * 0.9);
+
+      const live = n.d.online || n.d.is_gateway || n.d.is_self;
+      const base = n.d.is_gateway ? 0.1 : (live ? 0.075 : 0.055);
+      const s = (base + n.flash * 0.02) * (hover === mac ? 1.4 : 1);
+      n.icon.group.scale.setScalar(Math.max(s * 4.6 * n.icon.size, 0.0001));
+      n.icon.group.rotation.y = n.d.wifi ? orbit.theta : n.d.is_gateway ? Math.sin(t * 0.5) * 0.5 : t * 0.7 + n.phase;
+      n.halo.scale.setScalar(Math.max(s * (n.d.is_gateway ? 0 : 2.2 + n.flash * 2.5), 0.0001));
+      n.icon.setOpacity(n.fade * (live ? (n.d.activity === 'reposo' ? 0.7 : 1) : 0.55));
+      // los equipos despiertos "laten"; los que reposan o duermen quedan quietos
+      const beat = n.d.activity === 'activo' && !n.d.is_gateway && !n.d.is_self ? 0.1 * (1 + Math.sin(t * 4 + n.phase)) : 0;
+      const warn = n.d.known === false ? 0.25 * (1 + Math.sin(t * 6)) : 0;  // intruso potencial: late rojo fuerte
+      n.halo.material.opacity = n.fade * (0.1 + beat + warn + n.flash * 0.35);
+      n.stem.scale.y = n.g.position.y; n.stem.material.opacity = n.fade * 0.35;
+      n.foot.position.y = -n.g.position.y + 0.01; n.foot.material.opacity = n.fade * 0.5;
+      n.foot.visible = !n.d.is_gateway; n.stem.visible = !n.d.is_gateway;
+
+      const p = toScreen(n.g.position);
+      n.el.style.left = p.x + 'px'; n.el.style.top = p.y + 'px';
+      n.el.style.display = p.vis ? 'block' : 'none';
+      n.el.style.opacity = n.fade * (hover === mac ? 1 : 0.85);
+      n.el.style.color = css(colorOf(n.d));
+      n.el.innerHTML = `${n.d.name.replace(/</g, '&lt;')}<small>${n.d.wifi ? '~' + n.d.wifi.dist_m + ' m · ' + n.d.wifi.signal + '%' : n.d.ip}</small>`;
+      const dist = Math.hypot(p.x - mouse.x, p.y - mouse.y);
+      if (p.vis && dist < bestDist && !n.dying) { bestDist = dist; best = n; }
+    }
+    // hover por proximidad (si el mouse no está sobre la lista)
+    if (!drag && mouse.x < innerWidth - 350 || (!drag && innerWidth < 760)) {
+      const over = best ? best.d.mac : null;
+      document.querySelectorAll('.row').forEach(r => r.classList.toggle('hl', r.dataset.mac === over || r.dataset.mac === hover));
+      if (best) hover = best.d.mac; else if (!document.querySelector('.row:hover')) hover = null;
+    }
+    const hd = hover && nodes.get(hover);
+    if (hd) {
+      const d = hd.d;
+      tip.style.display = 'block';
+      tip.style.left = Math.min(mouse.x + 16, innerWidth - 270) + 'px'; tip.style.top = (mouse.y + 16) + 'px';
+      if (d.wifi) {
+        const w = d.wifi;
+        tip.innerHTML = `<b>${d.name.replace(/</g, '&lt;')}</b>${w.own ? ' (tu router)' : ''}<br>señal: ${w.signal}% (${qualityOf(w.signal)}, ~${w.rssi_dbm} dBm)<br>` +
+          `distancia estimada: ~${w.dist_m} m<br>seguridad: ${w.security}<br>canal${w.channel || '?'} · ${w.band || ''} · ${w.radio || ''}<br>` +
+          `equipos conectados: ${w.stations != null ? w.stations : 'no informa'}<br>` +
+          (w.utilization != null ? `canal ocupado: ${w.utilization}%<br>` : '') +
+          (w.delta_db != null ? `cambio vs. normal: ${w.delta_db > 0 ? '+' : ''}${w.delta_db} dB${w.moving ? ' ⚠ se mueve' : ''}<br>` : '') + w.mac;
+      } else if (d.bt && d.bt.nearby) {
+        tip.innerHTML = `<b>${d.name.replace(/</g, '&lt;')}</b><br>Bluetooth LE a tu alrededor<br>fabricante: ${d.bt.maker}<br>señal: ${d.bt.rssi} dBm<br>` +
+          `distancia estimada: ~${d.bt.dist_m} m (muy aproximada)<br>${d.bt.random ? 'usa dirección aleatoria: puede cambiar cada rato<br>' : ''}${d.bt.macs[0].match(/../g).join(':')}`;
+      } else if (d.bt) {
+        tip.innerHTML = `<b>${d.name.replace(/</g, '&lt;')}</b><br>tipo: ${d.kind}<br>estado: ${d.bt.connected ? 'conectado ahora' : 'emparejado, sin conexión'}<br>` +
+          d.bt.macs.map(m => m.match(/../g).join(':')).join('<br>');
+      } else
+      tip.innerHTML = `<b>${d.name.replace(/</g, '&lt;')}</b><br>${d.ip}<br>${d.mac}<br>${d.vendor}<br>${d.kind ? 'tipo: ' + d.kind + '<br>' : ''}` +
+        `latencia: ${d.rtt == null ? '—' : (d.rtt < 1 ? '<1' : d.rtt) + ' ms'}<br>` +
+        (d.activity && !d.is_self && !d.is_gateway ? `estado: ${d.activity}<br>` : '') +
+        `en red desde: ${d.first_seen ? new Date(d.first_seen * 1000).toLocaleTimeString() : 'siempre'}`;
+    } else tip.style.display = 'none';
+
+    if (mode !== 'net') {
+      const p = toScreen(coreGlow.position); centerLbl.style.left = p.x + 'px'; centerLbl.style.top = p.y + 'px';
+    }
+    for (const rl of ringLabels) {
+      const p = toScreen(rl.pos); rl.el.style.left = p.x + 'px'; rl.el.style.top = p.y + 'px';
+      rl.el.style.display = p.vis ? 'block' : 'none';
+    }
+    // ondas que salen del centro, como un radar real
+    if (radarOn) nextPing -= dt;
+    if (nextPing <= 0) {
+      nextPing = 2.8;
+      const m = new THREE.Mesh(new THREE.RingGeometry(0.985, 1, 96).rotateX(-Math.PI / 2),
+        new THREE.MeshBasicMaterial({ color: mode !== 'net' ? COL.self : COL.router, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false }));
+      m.position.y = 0.02; scene.add(m); pings.push({ m, t: 0 });
+    }
+    for (let i = pings.length - 1; i >= 0; i--) {
+      const u = pings[i]; u.t += dt; const k = u.t / 3.2;
+      u.m.scale.setScalar(0.2 + k * R); u.m.material.opacity = 0.45 * (1 - k) * (1 - k);
+      if (k >= 1) { scene.remove(u.m); u.m.geometry.dispose(); u.m.material.dispose(); pings.splice(i, 1); }
+    }
+    dust.rotation.y = t * 0.02;
+    for (let i = pulses.length - 1; i >= 0; i--) {
+      const u = pulses[i]; u.t += dt;
+      const k = u.t / 1.8; u.m.scale.setScalar(0.1 + k * 1.1); u.m.material.opacity = 0.9 * (1 - k);
+      if (k >= 1) { scene.remove(u.m); u.m.geometry.dispose(); u.m.material.dispose(); pulses.splice(i, 1); }
+    }
+    renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  }
+  frame();
+})();
+</script>
+</body>
+</html>

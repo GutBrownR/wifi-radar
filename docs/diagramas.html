@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>WiFi Radar - diagramas</title>
+<style>
+  @page { size: A4 landscape; margin: 14mm; }
+  body { font-family: "Segoe UI", Arial, sans-serif; color: #12303a; margin: 0; }
+  section { page-break-after: always; min-height: 170mm; }
+  section:last-child { page-break-after: auto; }
+  h1 { font-size: 22pt; margin: 0 0 4mm; color: #0b7a5a; }
+  p.sub { margin: 0 0 8mm; color: #567; font-size: 11pt; }
+  .mermaid { text-align: center; }
+</style>
+</head>
+<body>
+<section>
+  <h1>WiFi Radar: cómo funciona</h1>
+  <p class="sub">Todo corre en tu laptop. El servidor escanea y el navegador dibuja el radar 3D.</p>
+  <pre class="mermaid">
+flowchart LR
+  A["Laptop con Windows"] --> B["server.py<br/>servidor local 127.0.0.1"]
+  B --> C["Escaneo de red<br/>ping y tabla ARP"]
+  B --> D["Escaneo WiFi<br/>netsh wlan"]
+  B --> E["Bluetooth<br/>emparejados y del aire"]
+  C --> F["history.py<br/>historial en SQLite"]
+  D --> G["motion.py<br/>detector de movimiento"]
+  C --> H["Navegador<br/>radar 3D con Three.js"]
+  D --> H
+  E --> H
+  F --> H
+  G --> H
+  H --> I["Botones<br/>apagar radar, buscar, historial"]
+  </pre>
+</section>
+<section>
+  <h1>WiFi Radar: qué hace</h1>
+  <p class="sub">Seis funciones, todas para tu propia red.</p>
+  <pre class="mermaid">
+mindmap
+  root(("WiFi Radar"))
+    A("Mi red")
+      A1("Dispositivos con icono 3D")
+      A2("Alerta de equipo nuevo")
+      A3("Nombres por Bonjour")
+    B("WiFis cercanos")
+      B1("Señal y distancia estimada")
+      B2("Avisos de seguridad")
+      B3("Recomendador de canal")
+    C("Bluetooth")
+      C1("Emparejados y conectados")
+      C2("Dispositivos del aire")
+    D("Historial")
+      D1("Quién estuvo y cuánto tiempo")
+      D2("Llegada y salida por hora")
+    E("Movimiento")
+      E1("Calibra la señal normal")
+      E2("Avisa si varias redes cambian")
+    F("Control")
+      F1("Botón apagar y encender")
+      F2("Buscador y recalibrar")
+  </pre>
+</section>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: "default", securityLevel: "strict" });</script>
+</body>
+</html>
