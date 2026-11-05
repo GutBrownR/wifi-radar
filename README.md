@@ -50,6 +50,12 @@ Necesita Python 3 y Windows. Hace falta internet para cargar la librería Three.
 - `demo.py`: datos inventados para el modo demo y las capturas.
 - `names.json`: nombres que tú asignas. `known.json`: equipos de confianza. Ambos se crean al usarlo y **no se suben a git**.
 
+## Seguridad
+- El servidor solo escucha en `127.0.0.1` (tu propia laptop), sin contraseña ni cuentas.
+- Solo atiende a la **página del propio radar**: rechaza pedidos de otras páginas abiertas en tu navegador
+  (revisa `Host`, `Origin`, `Sec-Fetch-Site` y exige `application/json` en los botones). Ver `Handler._blocked` en `server.py`.
+- Si algún día lo expones a otros equipos de tu red, hace falta agregar una contraseña.
+
 ## Límites
 Muestra dispositivos, no personas. Las distancias son estimaciones. "Activo / en reposo" sale del ping,
 no mide datos. El movimiento por señal WiFi es aproximado; para algo mejor hace falta un ESP32 con CSI.

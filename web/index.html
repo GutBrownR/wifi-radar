@@ -166,6 +166,8 @@
   const R = 4.2;
   const COL = { online: 0x38f2a6, idle: 0xf5b942, router: 0x4cc9ff, self: 0xb794ff, alert: 0xff5d73 };
   const css = (n) => '#' + n.toString(16).padStart(6, '0');
+  // Todos los botones mandan JSON con esta marca: el servidor rechaza lo que no la traiga (ver server.py).
+  const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
   // ---------- escena ----------
   const canvas = document.getElementById('c');
@@ -493,7 +495,7 @@
     if (d.bt || d.mac === 'self') return;
     const v = prompt(`Nombre para ${d.ip} (${d.mac}).\nDéjalo vacío para quitar el nombre.`, d.custom_name ? d.name : '');
     if (v === null) return;
-    fetch('/api/rename', { method: 'POST', body: JSON.stringify({ mac: d.mac, name: v }) }).then(poll);
+    post('/api/rename', { mac: d.mac, name: v }).then(poll);
   }
 
   // ---------- alertas de dispositivo nuevo ----------
@@ -506,7 +508,7 @@
       setTimeout(() => { o.stop(); a.close(); }, 250);
     } catch (e) { /* el navegador puede bloquear el sonido hasta que hagas clic en la página */ }
   }
-  function trust(body) { return fetch('/api/trust', { method: 'POST', body: JSON.stringify(body) }).then(poll); }
+  function trust(body) { return post('/api/trust', body).then(poll); }
   function renderAlert(data) {
     const box = document.getElementById('alert');
     const unk = mode === 'net' ? data.devices.filter(d => d.known === false) : [];
@@ -623,7 +625,7 @@
   }
   $('power').onclick = async () => {
     const want = !radarOn; setPower(want);
-    try { await fetch('/api/power', { method: 'POST', body: JSON.stringify({ on: want }) }); } catch (e) { setPower(!want); }
+    try { await post('/api/power', { on: want }); } catch (e) { setPower(!want); }
     if (want) poll();
   };
   const syncToggles = () => { $('bSpin').classList.toggle('on', autoSpin); $('bSnd').classList.toggle('on', soundOn); };
@@ -646,7 +648,7 @@
     if (m.status === 'movimiento' && !wasMoving) beep();
     wasMoving = m.status === 'movimiento';
   }
-  $('bCal').onclick = () => fetch('/api/motion/reset', { method: 'POST', body: '{}' }).then(poll);
+  $('bCal').onclick = () => post('/api/motion/reset', {}).then(poll);
 
   // ---------- historial ----------
   let histDay = 0;

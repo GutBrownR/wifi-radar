@@ -686,9 +686,38 @@ def snapshot():
         }
 
 
+# Solo se atiende a la propia pagina del radar. Una pagina ajena abierta en tu navegador tambien sale de tu
+# laptop, pero trae otro "origen": por eso se mira de que pagina viene el pedido, no solo de que equipo.
+ALLOWED_HOSTS = {f"radar.localhost:{PORT}", f"localhost:{PORT}", f"127.0.0.1:{PORT}"}
+ALLOWED_ORIGINS = {f"http://{h}" for h in ALLOWED_HOSTS}
+
+
 class Handler(SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass
+
+    def _blocked(self, is_write):
+        """Motivo por el que se rechaza el pedido, o None si viene de la pagina del radar."""
+        if self.headers.get("Host", "") not in ALLOWED_HOSTS:
+            return "direccion no permitida"  # frena el truco "DNS rebinding"
+        if self.headers.get("Sec-Fetch-Site") == "cross-site":
+            return "viene de otra pagina"
+        origin = self.headers.get("Origin")
+        if origin is not None and origin not in ALLOWED_ORIGINS:
+            return "origen no permitido"
+        if is_write and self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
+            return "formato no permitido"  # una pagina ajena no puede mandar JSON sin pedir permiso antes
+        return None
+
+    def do_GET(self):
+        if self._blocked(False):
+            return self._json({"error": "forbidden"}, 403)
+        return self._get()
+
+    def do_POST(self):
+        if self._blocked(True):
+            return self._json({"error": "forbidden"}, 403)
+        return self._post()
 
     def _json(self, obj, code=200):
         body = json.dumps(obj).encode()
@@ -699,7 +728,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self):
+    def _get(self):
         if DEMO and self.path.startswith("/api/"):
             import demo
             route = self.path.split("?")[0]
@@ -736,7 +765,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json({**h, **extra})
         return super().do_GET()
 
-    def do_POST(self):
+    def _post(self):
         global known
         if self.path == "/api/motion/reset":
             motion.reset()
