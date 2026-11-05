@@ -154,6 +154,7 @@
   <button id="power" title="Apaga o prende todos los escaneos (red, WiFi y Bluetooth)"><i class="led"></i><span id="powerTxt">Apagar radar</span></button>
   <button id="bCal" title="Volver a medir la señal normal (úsalo si cambiaste algo de lugar)"><span class="ic">◎</span>Recalibrar</button>
   <button id="bView" title="Volver a la vista inicial"><span class="ic">⟲</span>Centrar</button>
+  <button id="bStyle" class="tg on" title="Cambia entre íconos normales y el estilo aviones, casitas y globos"><span class="ic">✈</span><span id="styleTxt">Aviones</span></button>
   <button id="bSpin" class="tg on" title="Giro automático de la cámara"><span class="ic">↻</span>Giro</button>
   <button id="bSnd" class="tg on" title="Sonido de alerta"><span class="ic">♪</span>Sonido</button>
   <button id="bFull" title="Pantalla completa"><span class="ic">⛶</span>Pantalla</button>
@@ -166,6 +167,7 @@
   const R = 4.2;
   const COL = { online: 0x38f2a6, idle: 0xf5b942, router: 0x4cc9ff, self: 0xb794ff, alert: 0xff5d73 };
   const css = (n) => '#' + n.toString(16).padStart(6, '0');
+  let funStyle = true, flyT = 0;  // estilo aviones (se puede apagar con el botón) y reloj de vuelo
   // Todos los botones mandan JSON con esta marca: el servidor rechaza lo que no la traiga (ver server.py).
   const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
@@ -297,16 +299,27 @@
       return new THREE.Vector3(Math.cos(a) * r, 0.25 + hash(d.mac, 7) * 1.6, Math.sin(a) * r);
     }
     if (d.is_gateway) return new THREE.Vector3(0, 0.35, 0);
-    const ang = hash(d.mac === 'self' ? d.ip : d.mac, 1) * Math.PI * 2;
     const rtt = d.rtt == null ? 30 : Math.min(d.rtt, 30);
     const r = 1.0 + (rtt / 30) * (R - 1.5);
+    // en el estilo "aviones" los equipos vuelan en círculos alrededor de la torre (más lento cuanto más lejos)
+    const ang = hash(d.mac === 'self' ? d.ip : d.mac, 1) * Math.PI * 2 + (funStyle ? flyT * (0.5 / (1 + r)) : 0);
     const y = 0.25 + hash(d.mac === 'self' ? d.ip : d.mac, 7) * 1.6;
     return new THREE.Vector3(Math.cos(ang) * r, y, Math.sin(ang) * r);
   }
   const colorOf = (d) => d.wifi ? (d.wifi.moving ? COL.alert : d.wifi.own ? COL.router : d.wifi.signal >= 55 ? COL.online : d.wifi.signal >= 30 ? COL.idle : 0x6a8f99) : d.known === false ? COL.alert : d.is_gateway ? COL.router : d.is_self ? COL.self : (d.online && d.activity !== 'reposo') ? COL.online : COL.idle;
 
   // ---------- íconos 3D por tipo de dispositivo (holograma: relleno tenue + aristas) ----------
+  // Estilo "aviones": equipos = aviones, router = torre de control, WiFis = casitas, Bluetooth = globos.
   function iconKey(d) {
+    const k = baseIconKey(d);
+    if (!funStyle) return k;
+    if (k === 'router') return 'tower';
+    if (k === 'ap') return 'house';
+    if (d.bt) return 'balloon';
+    if (k === 'drone') return 'drone';
+    return 'plane:' + k;  // el tamaño del avión depende del tipo (celular chico, laptop grande)
+  }
+  function baseIconKey(d) {
     if (d.wifi) return /dron|drone/i.test(d.name) ? 'drone' : 'ap';
     if (d.bt) return d.bt.kind === 'phone' ? 'phone' : d.bt.kind === 'tablet' ? 'tablet' : 'unknown';
     if (d.is_gateway) return 'router';
@@ -320,10 +333,12 @@
     if (k.startsWith('Linux')) return 'server';
     return 'unknown';
   }
-  const ICON_SIZE = { phone: 1, tablet: 1, tv: 0.9, pc: 0.9, laptop: 0.95, server: 0.9, router: 1.5, drone: 1.1, unknown: 1 };
+  const ICON_SIZE = { phone: 1, tablet: 1, tv: 0.9, pc: 0.9, laptop: 0.95, server: 0.9, router: 1.5, drone: 1.1, tower: 1.5, house: 1.1, balloon: 1, unknown: 1 };
+  const PLANE_SIZE = { phone: 1.3, tablet: 1.6, tv: 1.7, pc: 1.7, laptop: 2.0, server: 1.8, unknown: 1.5 };
 
   function buildIcon(key, color) {
     const group = new THREE.Group(), mats = [];
+    if (key.startsWith('plane:')) group.rotation.order = 'YXZ';  // girar primero el rumbo y luego inclinar las alas
     const box = (w, h, dp, x = 0, y = 0, z = 0) => part(new THREE.BoxGeometry(w, h, dp), x, y, z);
     function part(geo, x = 0, y = 0, z = 0) {
       const fill = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28, depthWrite: false });
@@ -332,7 +347,33 @@
       m.position.set(x, y, z); e.position.set(x, y, z);
       group.add(m, e); mats.push({ fill, line });
     }
-    switch (key) {
+    switch (key.startsWith('plane:') ? 'plane' : key) {
+      case 'plane':  // la nariz apunta a +x
+        box(1.0, 0.13, 0.13);
+        part(new THREE.ConeGeometry(0.075, 0.26, 6).rotateZ(-Math.PI / 2), 0.6, 0, 0);
+        box(0.32, 0.03, 1.3, -0.05, 0, 0);
+        box(0.16, 0.03, 0.5, -0.48, 0.02, 0);
+        box(0.22, 0.26, 0.03, -0.46, 0.17, 0);
+        break;
+      case 'tower':  // torre de control
+        box(0.7, 0.1, 0.7, 0, -0.5, 0);
+        part(new THREE.CylinderGeometry(0.1, 0.16, 0.75, 8), 0, -0.1, 0);
+        part(new THREE.CylinderGeometry(0.3, 0.2, 0.2, 8), 0, 0.37, 0);
+        part(new THREE.ConeGeometry(0.34, 0.2, 8), 0, 0.57, 0);
+        part(new THREE.CylinderGeometry(0.015, 0.015, 0.35, 4), 0, 0.84, 0);
+        break;
+      case 'house':  // casita que emite ondas
+        box(0.72, 0.42, 0.6, 0, -0.32, 0);
+        part(new THREE.ConeGeometry(0.62, 0.36, 4).rotateY(Math.PI / 4), 0, 0.07, 0);
+        box(0.14, 0.24, 0.03, 0, -0.41, 0.31);
+        box(0.1, 0.2, 0.1, 0.22, 0.12, -0.1);
+        for (const r of [0.28, 0.46]) part(new THREE.TorusGeometry(r, 0.025, 4, 24, Math.PI), 0, 0.45, 0);
+        break;
+      case 'balloon':
+        part(new THREE.IcosahedronGeometry(0.4, 1), 0, 0.2, 0);
+        box(0.16, 0.12, 0.16, 0, -0.5, 0);
+        for (const x of [-0.08, 0.08]) part(new THREE.CylinderGeometry(0.01, 0.01, 0.55, 3), x, -0.2, 0);
+        break;
       case 'phone':  box(0.5, 1, 0.08); box(0.4, 0.82, 0.09, 0, 0.02, 0); break;
       case 'tablet': box(0.95, 0.7, 0.07); box(0.82, 0.57, 0.08); break;
       case 'tv':     box(1.4, 0.8, 0.08, 0, 0.12, 0); box(0.08, 0.2, 0.08, 0, -0.38, 0); box(0.5, 0.05, 0.25, 0, -0.5, 0); break;
@@ -361,7 +402,7 @@
       default: part(new THREE.OctahedronGeometry(0.5));
     }
     return {
-      group, size: ICON_SIZE[key] || 1,
+      group, size: key.startsWith('plane:') ? (PLANE_SIZE[key.slice(6)] || 1) : (ICON_SIZE[key] || 1),
       setColor(c) { for (const m of mats) { m.fill.color.setHex(c); m.line.color.setHex(c); } },
       setOpacity(o) { for (const m of mats) { m.fill.opacity = 0.28 * o; m.line.opacity = o; } },
       dispose() { group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); },
@@ -628,7 +669,12 @@
     try { await post('/api/power', { on: want }); } catch (e) { setPower(!want); }
     if (want) poll();
   };
-  const syncToggles = () => { $('bSpin').classList.toggle('on', autoSpin); $('bSnd').classList.toggle('on', soundOn); };
+  funStyle = store.get('fun', true);
+  const syncToggles = () => {
+    $('bSpin').classList.toggle('on', autoSpin); $('bSnd').classList.toggle('on', soundOn);
+    $('bStyle').classList.toggle('on', funStyle); $('styleTxt').textContent = funStyle ? 'Aviones' : 'Clásico';
+  };
+  $('bStyle').onclick = () => { funStyle = !funStyle; store.set('fun', funStyle); syncToggles(); poll(); };
   $('bSpin').onclick = () => { autoSpin = !autoSpin; store.set('spin', autoSpin); syncToggles(); };
   $('bSnd').onclick = () => { soundOn = !soundOn; store.set('snd', soundOn); syncToggles(); if (soundOn) beep(); };
   $('bView').onclick = () => { orbit.theta = 0.7; orbit.phi = 1.05; orbit.dist = 9.5; intro = false; };
@@ -736,9 +782,11 @@
     coreGlow.scale.setScalar(1 + Math.sin(t * 3) * 0.25);
 
     let best = null, bestDist = 22;
+    flyT = t;
     for (const [mac, n] of nodes) {
+      if (funStyle && mode === 'net' && !n.d.is_gateway) n.goal = targetFor(n.d);  // los aviones recalculan su posición al volar
       n.g.position.lerp(n.goal, Math.min(1, dt * 3));
-      n.icon.group.position.y = n.d.is_gateway ? 0 : Math.sin(t * 1.6 + n.phase) * 0.05;  // flotan suavemente
+      n.icon.group.position.y = n.d.is_gateway ? 0 : Math.sin(t * 1.6 + n.phase) * (n.key === 'balloon' ? 0.12 : 0.05);  // flotan suavemente
       if (n.link) {
         const pa = n.link.geometry.attributes.position;
         pa.setXYZ(1, n.g.position.x, n.g.position.y, n.g.position.z); pa.needsUpdate = true;
@@ -758,7 +806,12 @@
       const base = n.d.is_gateway ? 0.1 : (live ? 0.075 : 0.055);
       const s = (base + n.flash * 0.02) * (hover === mac ? 1.4 : 1);
       n.icon.group.scale.setScalar(Math.max(s * 4.6 * n.icon.size, 0.0001));
-      n.icon.group.rotation.y = n.d.wifi ? orbit.theta : n.d.is_gateway ? Math.sin(t * 0.5) * 0.5 : t * 0.7 + n.phase;
+      if (n.key.startsWith('plane:')) {  // rumbo = tangente del círculo; alas inclinadas hacia el centro como al virar
+        n.icon.group.rotation.y = -(Math.atan2(n.g.position.z, n.g.position.x) + Math.PI / 2);
+        n.icon.group.rotation.x = 0.3;
+      } else {
+        n.icon.group.rotation.y = n.d.wifi ? orbit.theta : n.d.is_gateway ? Math.sin(t * 0.5) * 0.5 : t * 0.7 + n.phase;
+      }
       n.halo.scale.setScalar(Math.max(s * (n.d.is_gateway ? 0 : 2.2 + n.flash * 2.5), 0.0001));
       n.icon.setOpacity(n.fade * (live ? (n.d.activity === 'reposo' ? 0.7 : 1) : 0.55));
       // los equipos despiertos "laten"; los que reposan o duermen quedan quietos
